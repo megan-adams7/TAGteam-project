@@ -26,9 +26,9 @@
 #      genes/
 
 export PATH=/programs/bedops-2.4.35/bin:$PATH
-for filename in *.gtf; do
+for filename in bed/*.gtf; do
     gff2bed < "$filename" > $(basename "$filename" .gtf).bed
-    mv $(basename "$filename" .gtf).bed bed
+    mv $(basename "$filename" .gtf).bed bed_genes
 done
 
 
@@ -44,8 +44,9 @@ done
 #get bed file for only start codons and sxl gene
 
 for filename in bed/*.bed ; do
-    grep -E "start_codon" "$filename" > genes/$(basename "$filename" .bed)_genes_og.bed
-    grep -E "NW_022587371.1|NC_057931.1|NC_004354.4|NC_046683.1" genes/$(basename "$filename" .bed)_genes_og.bed > bed_genes/$(basename "$filename" .bed)_genes.bed
+    #isolate x chromosome
+    grep -E "NW_022587371.1|NC_057931.1|NC_004354.4|NC_046683.1" "$filename" > genes/$(basename "$filename" .bed)_genes_og.bed
+    grep -E genes/$(basename "$filename" .bed)_genes_og.bed > bed_genes/$(basename "$filename" .bed)_genes.bed
 done
 
 #get lengths of contigs
