@@ -25,16 +25,7 @@ Results are visualized using R to highlight gene- and species-specific differenc
 
 ## Repository Structure
 
-TAGteam-project/
-│
-├── gtf_files          # gtf files for Drosophila species
-├── zipped_fasta       # fasta files for Drosophila species
-├── gene_name          # Working directory
-│   ├── main.sh        # Main script
-│   ├── vis.Rmd        # Visualization pipeline
-│   ├── table.csv      # empty csv table 
-│   ├── gene_name_protein.fasta     # sample gene protein sequence fasta file
-└── README.md
+<pre> ``` TAGteam-project/ │ ├── gtf_files # gtf files for Drosophila species ├── zipped_fasta # fasta files for Drosophila species ├── gene_name # Working directory │ ├── main.sh # Main script │ ├── vis.Rmd # Visualization pipeline │ ├── table.csv # empty csv table │ ├── gene_name_protein.fasta # sample gene protein sequence fasta file └── README.md ``` </pre>
 
 ## Sample results
-![TAGteam Motif Distribution](sna_plot.png)
+![TAGteam Motif Distribution](/sna_plot.png)

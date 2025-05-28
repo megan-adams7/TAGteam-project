@@ -5,24 +5,26 @@ set -euo pipefail
 # --- Configuration ---
 gene_name="sxl" # replace with your gene of interest
 protein_fasta="${gene_name}_protein.fasta" # protein sequence fasta file for gene of interest
-fasta_dir="../zipped_fasta"
-gtf_dir="../gtf_files"
-output_dir="results/${gene_name}"
+fasta_dir="../zipped_fasta" #location of fasta files for all species
+gtf_dir="../gtf_files" #location of gtf files for all species
 
-mkdir -p ./{bed_genes,fna_sizes,500_upstream/{plus/{fasta,canonical_tagteam/csv},minus/{fasta,canonical_tagteam/csv}}}
-# The directory is as follows in which this is the file main.sh in the workding directory \gene-name
+
+mkdir -p ./{bed_genes,500_upstream/{plus/{fasta,canonical_tagteam},minus/{fasta,canonical_tagteam}},results/{plus,minus}}
+# The directory is as follows in which this is the file main.sh in the workding directory gene-name
 #   gene_name/
-#      500_upstream/plus/
+#      500_upstream/
 #          plus/
 #              fasta/
 #              canonical_tagteam/
-#                csv/
+#                csv/ #where final coordinates are located
 #           minus/
 #              fasta/
 #              canonical_tagteam/
-#                csv/
+#                csv/ #where final coordinates are located
 #      bed_genes/
-#      fna_sizes/
+#      results/
+#           plus/
+#           minus/
 #
 
 export PATH=/programs/bedtools2-2.29.2/bin:$PATH
@@ -31,37 +33,41 @@ export PATH=/programs/seqkit-0.15.0:$PATH
 
 
 # --- Step 1: Run tblastn against all fna files ---
-# Description: Finds the best hit for the gene of interest for each species. Determines where in the genome the best hit corresponds to.
+# Description: Blasts each species genome to the gene of interest and finds the best hit. Determines where in the genome the best hit corresponds to.
+export protein_fasta fasta_dir gtf_dir N
 
-echo "Running tblastn searches..."
-for fasta_file in "$fasta_dir"/*.fna; do
-    # Run tblastn and process the results in a single pipeline
-    tblastn -query "$protein_fasta" -subject "$fasta_file" -outfmt 6 -evalue 1e-5 -max_target_seqs 10 |
-        sort -k 11,11 -g |       # Sort by bitscore
-        head -n 1 |              # Extract top hit
+process_file() {
+    fasta_file="$1"
+    base=$(basename "$fasta_file" .fna)
+
+    tblastn -query "$protein_fasta" -subject "$fasta_file" -outfmt 6 -evalue 1e-5 -max_target_seqs 10 | # blast to the protein sequence
+        head -n 1 | # get the best hit located in the first row
         awk '{
             OFS="\t";
             strand = ($9 <= $10) ? "+" : "-";
             start = ($9 <= $10) ? $9 : $10;
             end = ($9 <= $10) ? $10 : $9;
             print $2, "tblastn", "similarity", start, end, $12, strand, ".", "ID="$1";evalue="$11";bitscore="$12
-        }' > $(basename "$fasta_file" .fna)_bh.gff
+        }' > "${base}_bh.gff"
 
-    # Perform intersection with the corresponding GTF file
-    bedtools intersect -a "$gtf_dir"/$(basename "$fasta_file" .fna).gtf -b $(basename "$fasta_file" .fna)_bh.gff -wa \
-        > $(basename "$fasta_file" .fna)_bh_overlap
+    bedtools intersect -a "$gtf_dir/${base}.gtf" -b "${base}_bh.gff" -wa > "${base}_bh_overlap" # find where the best hit overlaps in the genome
 
-    # Clean up intermediate files
-    rm $(basename "$fasta_file" .fna)_bh.gff
-done
+    rm "${base}_bh.gff"
+}
 
+export -f process_file
+
+echo "Running tblastn searches..."
+parallel -j "$N" process_file ::: "$fasta_dir"/*.fna
+
+# --- Step 2: Isolate only the mRNA strands in which the best hit overlaps with  ---
 echo "Isolating mRNA strands..."
-# Isolate mRNA strands from the overlap files
 for overlap_file in ./*_overlap; do
     grep -w "mRNA" "$overlap_file" > "${overlap_file}_mRNA"
     rm "$overlap_file"  # Remove the original overlap file after processing
 done
 
+# --- Step 3: Modify gtf files to label the best hit gene ---
 echo "Modifying annotations..."
 # Modify annotations in the mRNA files
 for mRNA_file in ./*_mRNA; do
@@ -97,7 +103,7 @@ for mRNA_file in ./*_mRNA; do
 
 done
 
-
+# --- Step 4: Find the start codon for the gene  ---
 for filename in "$gtf_dir"/*.gtf; do
     output_file="bed_genes/$(basename "$filename" .gtf)_genes.gtf"
     > "$output_file"
@@ -149,6 +155,7 @@ if	(index($0,	"gene_name")	!=	0)	{
     ' output_file="$output_file" "$filename"
 done
 
+# --- Step 5: Isolate 500 bp upstream of start codon  ---
 for gtf_file in bed_genes/*.gtf; do
     base=$(basename "$gtf_file" .gtf)
     
@@ -173,10 +180,7 @@ for gtf_file in bed_genes/*.gtf; do
     rm "$gtf_file"
 done
 
-for filename in "$fasta_dir"/*.fna; do
-    faidx "$filename" -i chromsizes -o fna_sizes/$(basename "$filename" .fna).fna_sizes
-done
-
+# --- Step 6: Get the coordinates for the motif locations in base pair region ---
 # Define function to process strand
 process_strand() {
     strand=$1  # "plus" or "minus"
@@ -190,7 +194,7 @@ process_strand() {
         genome_fasta="$fasta_dir/$(basename "$filepath" _genes_${strand}_500_upstream).fna"
         tagteam_output="$input_dir/canonical_tagteam/${base}_canonical_tagteam"
         final_output="${tagteam_output}_fin"
-        csv_output="$input_dir/canonical_tagteam/csv/${base}.csv"
+        csv_output="./results/$strand/${base}.csv"
 
         # Get FASTA
         bedtools getfasta -fo "$fasta_file" -fi "$genome_fasta" -bed "$filepath" -nameOnly
@@ -206,19 +210,20 @@ process_strand() {
     done
 }
 
-# Run for both strands
-process_strand "minus"
-process_strand "plus"
+
+export -f process_strand
+# Run both strands
+parallel process_strand ::: "minus" "plus"
 
 for filename in "$gtf_dir"/*; do
     input_file="$filename"
     output_file="$filename".2
 
-    awk 'BEGIN { OFS="\t" }
+    awk -v gene_name="$gene_name" 'BEGIN { OFS="\t" }
     {
-        # Check if "real-gene-name" is in any column
+        # Check if "gene_name" is in any column
         for (i=1; i<=NF; i++) {
-            if ($i ~ /real-gene-name/) {
+            if ($i ~ /gene_name/) {
                 # Combine all columns from 9 onwards into column 9
                 for (j=9; j<=NF; j++) {
                     $9 = $9 " " $j;
